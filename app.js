@@ -33,9 +33,11 @@ const ui = {
   tableArea: document.getElementById("tableArea"),
   handArea: document.getElementById("handArea"),
   actionArea: document.getElementById("actionArea"),
+  actionsPanel: document.getElementById("actionsPanel"),
   logArea: document.getElementById("logArea"),
   turnLabel: document.getElementById("turnLabel"),
   playsLeft: document.getElementById("playsLeft"),
+  handTurnIndicator: document.getElementById("handTurnIndicator"),
   endTurn: document.getElementById("endTurn"),
   discardExtras: document.getElementById("discardExtras"),
   modal: document.getElementById("modal"),
@@ -43,7 +45,14 @@ const ui = {
   modalBody: document.getElementById("modalBody"),
   modalCancel: document.getElementById("modalCancel"),
   modalConfirm: document.getElementById("modalConfirm"),
+  resultOverlay: document.getElementById("resultOverlay"),
+  resultCard: document.getElementById("resultCard"),
+  resultTitle: document.getElementById("resultTitle"),
+  resultSubtitle: document.getElementById("resultSubtitle"),
+  resultClose: document.getElementById("resultClose"),
 };
+
+let resultTimer = null;
 
 const PROPERTY_SETS = {
   brown: { label: "Brown", size: 2, rent: [1, 2], value: 1 },
@@ -237,6 +246,7 @@ function initialGame(hostPlayer) {
     currentPlayerId: null,
     turn: { playsLeft: 0, rentMultiplier: 1, drew: false },
     pending: null,
+    winnerId: null,
     log: ["Game created."],
   };
 }
@@ -290,6 +300,7 @@ function checkWin(game) {
   for (const player of game.players) {
     if (completeSetCount(game, player.id) >= 3) {
       game.phase = "ended";
+      game.winnerId = player.id;
       logGame(game, `${player.name} wins with 3 complete sets!`);
       return player;
     }
@@ -753,6 +764,9 @@ function renderTable() {
   game.players.forEach((player) => {
     const area = document.createElement("div");
     area.className = "player-area";
+    if (player.id === game.currentPlayerId && game.phase === "playing") {
+      area.classList.add("current-turn");
+    }
     const header = document.createElement("div");
     header.className = "player-header";
     const name = document.createElement("strong");
@@ -761,7 +775,9 @@ function renderTable() {
     const badge = document.createElement("span");
     badge.className = "badge";
     badge.textContent =
-      player.id === game.currentPlayerId ? "Current Turn" : `Hand ${player.handCount ?? player.hand.length}`;
+      player.id === game.currentPlayerId
+        ? "Current Turn"
+        : `Hand ${player.handCount ?? player.hand.length}`;
     header.appendChild(badge);
     area.appendChild(header);
 
@@ -813,7 +829,7 @@ function renderTable() {
 }
 
 function makeMiniCard(card) {
-  const mini = makeCardToken(card);
+  const mini = makeCardToken(card, { interactive: false });
   mini.classList.add("mini");
   return mini;
 }
@@ -825,7 +841,7 @@ function renderHand() {
   const player = getPlayer(game, state.playerId);
   if (!player) return;
   player.hand.forEach((card) => {
-    ui.handArea.appendChild(makeCardToken(card));
+    ui.handArea.appendChild(makeCardToken(card, { interactive: true }));
   });
 }
 
@@ -833,6 +849,16 @@ function renderActions() {
   ui.actionArea.innerHTML = "";
   const game = state.viewGame;
   if (!game) return;
+  const waiting =
+    (game.pending?.type === "response" &&
+      (game.pending.responderId === state.playerId ||
+        (!game.pending.responderId &&
+          game.pending.eligibleResponders?.includes(state.playerId)))) ||
+    (game.pending?.type === "payment" &&
+      game.pending.fromIds[game.pending.currentIndex] === state.playerId) ||
+    (game.pending?.type === "discard" &&
+      game.pending.playerId === state.playerId);
+  ui.actionsPanel.classList.toggle("action-pulse", waiting);
 
   if (
     game.pending?.type === "response" &&
@@ -847,6 +873,17 @@ function renderActions() {
     const jsnCards = getPlayer(game, state.playerId).hand.filter(
       (item) => item.action === "just-say-no",
     );
+    if (jsnCards.length === 0) {
+      requestAnimationFrame(() => {
+        sendAction({
+          type: "respond",
+          responseType: "jsn",
+          response: "no-jsn",
+          playerId: state.playerId,
+        });
+      });
+      return;
+    }
     jsnCards.forEach((jsn) => {
       const btn = document.createElement("button");
       btn.className = "ghost";
@@ -861,17 +898,6 @@ function renderActions() {
         });
       ui.actionArea.appendChild(btn);
     });
-    const skip = document.createElement("button");
-    skip.className = "ghost";
-    skip.textContent = "No Just Say No";
-    skip.onclick = () =>
-      sendAction({
-        type: "respond",
-        responseType: "jsn",
-        response: "no-jsn",
-        playerId: state.playerId,
-      });
-    ui.actionArea.appendChild(skip);
     return;
   }
 
@@ -923,7 +949,11 @@ function renderLog() {
 
 function updateTurnInfo() {
   const game = state.viewGame;
-  if (!game) return;
+  if (!game) {
+    ui.handTurnIndicator.classList.remove("show");
+    ui.endTurn.hidden = true;
+    return;
+  }
   const current = getPlayer(game, game.currentPlayerId);
   ui.turnLabel.textContent =
     game.phase === "ended"
@@ -932,6 +962,13 @@ function updateTurnInfo() {
         ? `Turn: ${current.name}`
         : "Waiting for host...";
   ui.playsLeft.textContent = `Plays: ${game.turn?.playsLeft ?? 0}`;
+  const isYourTurn =
+    game.phase === "playing" &&
+    game.currentPlayerId === state.playerId &&
+    !game.pending;
+  const shouldShowTurnChip = isYourTurn && game.currentPlayerId === state.playerId;
+  ui.handTurnIndicator.classList.toggle("show", shouldShowTurnChip);
+  ui.endTurn.hidden = !shouldShowTurnChip;
   ui.endTurn.disabled =
     !game ||
     game.phase !== "playing" ||
@@ -940,6 +977,32 @@ function updateTurnInfo() {
   ui.discardExtras.disabled = !(
     game.pending?.type === "discard" && game.pending.playerId === state.playerId
   );
+}
+
+function updateResultOverlay() {
+  const game = state.viewGame;
+  if (!game || game.phase !== "ended") {
+    ui.resultOverlay.hidden = true;
+    return;
+  }
+  const winner = game.players.find((player) => player.id === game.winnerId);
+  const isWinner = game.winnerId === state.playerId;
+  ui.resultCard.classList.toggle("win", isWinner);
+  ui.resultCard.classList.toggle("lose", !isWinner);
+  ui.resultTitle.textContent = isWinner ? "You Win!" : "You Lose";
+  ui.resultSubtitle.textContent = isWinner
+    ? "You completed three full sets first."
+    : `${winner?.name || "Another player"} completed three full sets first.`;
+  ui.resultOverlay.hidden = false;
+  if (resultTimer) {
+    clearTimeout(resultTimer);
+  }
+  resultTimer = setTimeout(() => {
+    ui.resultOverlay.hidden = true;
+  }, 4000);
+  if (isWinner) {
+    launchConfetti();
+  }
 }
 
 function render() {
@@ -951,13 +1014,19 @@ function render() {
     const connectionPanel = ui.connectionPanel;
     const lobbyPanel = ui.lobbyPanel;
     const handCard = gamePanel.querySelector(".hand-card");
+    if (ui.actionsPanel) {
+      ui.appRoot.insertBefore(ui.actionsPanel, ui.appRoot.firstChild);
+    }
     if (handCard) {
-      ui.appRoot.insertBefore(handCard, gamePanel);
+      ui.appRoot.insertBefore(handCard, ui.actionsPanel?.nextSibling || gamePanel);
     }
     ui.appRoot.appendChild(gamePanel);
     ui.appRoot.appendChild(connectionPanel);
     ui.appRoot.appendChild(lobbyPanel);
   } else {
+    if (ui.actionsPanel && !ui.gamePanel.contains(ui.actionsPanel)) {
+      ui.gamePanel.querySelector(".sidebar")?.prepend(ui.actionsPanel);
+    }
     const handCard = ui.appRoot.querySelector(".hand-card");
     if (handCard && !ui.gamePanel.contains(handCard)) {
       ui.gamePanel.appendChild(handCard);
@@ -974,9 +1043,11 @@ function render() {
   renderActions();
   renderLog();
   updateTurnInfo();
+  updateResultOverlay();
 }
 
-function makeCardToken(card) {
+function makeCardToken(card, options = {}) {
+  const { interactive = false } = options;
   const cardEl = document.createElement("div");
   cardEl.className = `card-token ${card.type}`;
   const frame = document.createElement("div");
@@ -1030,10 +1101,10 @@ function makeCardToken(card) {
     emblem.textContent = card.type === "rent" ? "Rent" : formatActionName(card.action);
     frame.appendChild(emblem);
     if (card.type === "rent") {
-      const rentTable = buildRentTable(card, card.colors);
-      if (rentTable) {
-        frame.appendChild(rentTable);
-      }
+      const stripe = document.createElement("div");
+      stripe.className = "rent-stripe";
+      stripe.style.background = makeRentStripe(card.colors);
+      frame.appendChild(stripe);
     }
   }
 
@@ -1058,9 +1129,11 @@ function makeCardToken(card) {
   frame.appendChild(footer);
 
   if (
+    interactive &&
     state.viewGame.phase === "playing" &&
     state.viewGame.currentPlayerId === state.playerId &&
-    !state.viewGame.pending
+    !state.viewGame.pending &&
+    state.viewGame.turn?.playsLeft > 0
   ) {
     const actions = document.createElement("div");
     actions.className = "hand-actions";
@@ -1100,6 +1173,20 @@ function makeColorGradient(colors) {
     .map((color) => PROPERTY_COLOR_HEX[color] || "#d7d7d7");
   if (palette.length === 1) return palette[0];
   return `linear-gradient(90deg, ${palette[0]} 0%, ${palette[0]} 50%, ${palette[1]} 50%, ${palette[1]} 100%)`;
+}
+
+function makeRentStripe(colors = []) {
+  const palette = colors.map((color) => PROPERTY_COLOR_HEX[color] || "#d7d7d7");
+  if (palette.length === 0) return "#d7d7d7";
+  const step = 100 / palette.length;
+  const stops = palette
+    .map((color, index) => {
+      const start = (step * index).toFixed(2);
+      const end = (step * (index + 1)).toFixed(2);
+      return `${color} ${start}%, ${color} ${end}%`;
+    })
+    .join(", ");
+  return `linear-gradient(90deg, ${stops})`;
 }
 
 function isDarkPalette(colors) {
@@ -1803,6 +1890,34 @@ ui.copyInvite.onclick = () => {
   if (!inviteUrl || ui.inviteRow.hidden) return;
   copyInviteUrl(inviteUrl);
 };
+
+ui.resultClose.onclick = () => {
+  ui.resultOverlay.hidden = true;
+};
+
+function launchConfetti() {
+  const existing = document.querySelector(".confetti");
+  if (existing) {
+    existing.remove();
+  }
+  const confetti = document.createElement("div");
+  confetti.className = "confetti";
+  const colors = ["#f2d23c", "#cf2f2f", "#2f8b57", "#8dc6e9", "#d670ad"];
+  for (let i = 0; i < 28; i += 1) {
+    const piece = document.createElement("div");
+    piece.className = "confetti-piece";
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.setProperty("--x", `${(Math.random() - 0.5) * 100}px`);
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDelay = `${Math.random() * 0.4}s`;
+    piece.style.transform = `rotate(${Math.random() * 180}deg)`;
+    confetti.appendChild(piece);
+  }
+  document.body.appendChild(confetti);
+  setTimeout(() => {
+    confetti.remove();
+  }, 3200);
+}
 
 ui.startGame.onclick = () => {
   if (!state.isHost) return;
