@@ -19,6 +19,8 @@ const ui = {
   joinCard: document.getElementById("joinCard"),
   lobbyPanel: document.getElementById("lobbyPanel"),
   hostControls: document.getElementById("hostControls"),
+  lobbyCodeRow: document.getElementById("lobbyCodeRow"),
+  lobbyGameCode: document.getElementById("lobbyGameCode"),
   gamePanel: document.getElementById("gamePanel"),
   hostName: document.getElementById("hostName"),
   hostGame: document.getElementById("hostGame"),
@@ -736,6 +738,12 @@ function showPanel(panel) {
 function updateLobbyView() {
   if (!state.viewGame) return;
   ui.hostControls.hidden = !state.isHost;
+  if (state.isHost && state.hostId) {
+    ui.lobbyCodeRow.hidden = false;
+    ui.lobbyGameCode.value = state.hostId;
+  } else if (ui.lobbyCodeRow) {
+    ui.lobbyCodeRow.hidden = true;
+  }
   const lobbySubtitle = ui.lobbyPanel.querySelector(".panel-header p");
   if (lobbySubtitle) {
     lobbySubtitle.textContent = state.isHost
