@@ -29,3 +29,10 @@ Then open the printed `http://localhost:PORT`.
 - `index.html` — UI shell and layout.
 - `styles.css` — visual theme and responsive styling.
 - `app.js` — game logic, rules, and multiplayer sync.
+
+## Hosting on GitHub Pages
+
+1. Push to `main`.
+2. In GitHub, go to Settings → Pages.
+3. Under “Build and deployment,” select “GitHub Actions.”
+4. Wait for the “Deploy to GitHub Pages” workflow to finish, then use the provided URL.
