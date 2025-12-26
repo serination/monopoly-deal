@@ -544,6 +544,10 @@ function playCardAction(game, action) {
   if (!card) return;
 
   if (action.playAs === "bank") {
+    if (card.type === "property" || card.type === "wild") {
+      player.hand.push(card);
+      return;
+    }
     addToBank(player, card);
     logGame(game, `${player.name} banks ${card.name}.`);
     game.turn.playsLeft -= 1;
@@ -1145,11 +1149,13 @@ function makeCardToken(card, options = {}) {
   ) {
     const actions = document.createElement("div");
     actions.className = "hand-actions";
-    const bankBtn = document.createElement("button");
-    bankBtn.className = "ghost";
-    bankBtn.textContent = "Bank";
-    bankBtn.onclick = () => sendPlay(card, "bank");
-    actions.appendChild(bankBtn);
+    if (card.type !== "property" && card.type !== "wild") {
+      const bankBtn = document.createElement("button");
+      bankBtn.className = "ghost";
+      bankBtn.textContent = "Bank";
+      bankBtn.onclick = () => sendPlay(card, "bank");
+      actions.appendChild(bankBtn);
+    }
 
     if (card.type === "property" || card.type === "wild") {
       const propBtn = document.createElement("button");
