@@ -1834,7 +1834,10 @@ function joinGame(code) {
     });
     conn.on("data", (data) => handleClientMessage(data));
     conn.on("close", () => setStatus("Disconnected"));
-    conn.on("error", () => setStatus("Connection error"));
+    conn.on("error", () => {
+      showNotice("Connection error. Check the invite code.");
+      setStatus("Connection error");
+    });
   });
   peer.on("error", () => {
     showNotice("Unable to reach the host.");
@@ -1939,6 +1942,13 @@ if (gameCode) {
   ui.joinCode.value = gameCode;
   ui.hostCard.hidden = true;
   ui.joinCard.hidden = false;
+  if (!ui.joinName.value) {
+    ui.joinName.value = "Player";
+  }
+  setTimeout(() => {
+    state.playerName = ui.joinName.value.trim() || "Player";
+    joinGame(gameCode);
+  }, 300);
 } else {
   ui.hostCard.hidden = false;
   ui.joinCard.hidden = true;
